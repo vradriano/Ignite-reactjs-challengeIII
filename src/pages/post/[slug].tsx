@@ -1,9 +1,15 @@
 import { GetStaticPaths, GetStaticProps } from 'next';
 
-import { getPrismicClient } from '../../services/prismic';
+import { RichText } from 'prismic-dom';
 
-import commonStyles from '../../styles/common.module.scss';
+import { useRouter } from 'next/router';
+import Head from 'next/head';
+import { format } from 'date-fns';
+import { ptBR } from 'date-fns/locale';
 import styles from './post.module.scss';
+import commonStyles from '../../styles/common.module.scss';
+import { getPrismicClient } from '../../services/prismic';
+import Header from '../../components/Header';
 
 interface Post {
   first_publication_date: string | null;
@@ -26,20 +32,96 @@ interface PostProps {
   post: Post;
 }
 
-// export default function Post() {
-//   // TODO
-// }
+export default function Post({ post }: PostProps): JSX.Element {
+  const totalWords = post.data.content.reduce((total, contentItem) => {
+    total += contentItem.heading.split(' ').length;
 
-// export const getStaticPaths = async () => {
-//   const prismic = getPrismicClient({});
-//   const posts = await prismic.getByType(TODO);
+    const words = contentItem.body.map(item => item.text.split(' ').length);
+    words.map(word => (total += word));
+    return total;
+  }, 0);
+  const readTime = Math.ceil(totalWords / 200);
+  const router = useRouter();
+  if (router.isFallback) {
+    return <h1>Carregando...</h1>;
+  }
 
-//   // TODO
-// };
+  const formatedDate = format(
+    new Date(post.first_publication_date),
+    'dd MMM yyyy',
+    {
+      locale: ptBR,
+    }
+  );
 
-// export const getStaticProps = async ({params }) => {
-//   const prismic = getPrismicClient({});
-//   const response = await prismic.getByUID(TODO);
+  return (
+    <div>
+      <Head>
+        <title>{`${post.data.title} | spacetraveling`}</title>
+      </Head>
+      <div className={styles.container}>
+        <Header />
+      </div>
+      <img alt="temp" className={styles.banner} src={post.data.banner.url} />
+      <div className={commonStyles.container}>
+        <div>
+          <h1>{post.data.title}</h1>
+          <div>
+            <p>{formatedDate}</p>
+            <p>{post.data.author}</p>
+            <p>{`${readTime} min`}</p>
+          </div>
+        </div>
+        <div>
+          {post.data.content.map(p => (
+            <article key={p.heading}>
+              <h2>{p.heading}</h2>
+              <div
+                dangerouslySetInnerHTML={{ __html: RichText.asHtml(p.body) }}
+              />
+            </article>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
 
-//   // TODO
-// };
+export const getStaticPaths: GetStaticPaths = async () => {
+  const prismic = getPrismicClient({});
+  const posts = await prismic.getByType('posts');
+
+  const paths = posts.results.map(post => ({
+    params: { slug: post.uid },
+  }));
+  return { paths, fallback: true };
+};
+
+export const getStaticProps: GetStaticProps = async ({ params }) => {
+  const prismic = getPrismicClient({});
+  const { slug } = params;
+  const response = await prismic.getByUID('posts', String(slug), {});
+  const post = {
+    uid: response.uid,
+    first_publication_date: response.first_publication_date,
+    data: {
+      title: response.data.title,
+      subtitle: response.data.subtitle,
+      author: response.data.author,
+      banner: {
+        url: response.data.banner.url,
+      },
+      content: response.data.content.map(content => {
+        return {
+          heading: content.heading,
+          body: [...content.body],
+        };
+      }),
+    },
+  };
+  return {
+    props: {
+      post,
+    },
+  };
+};
